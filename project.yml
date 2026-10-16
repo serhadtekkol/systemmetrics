@@ -1,0 +1,64 @@
+name: SystemMetrics
+options:
+  bundleIdPrefix: com.serhadtekkol
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    ARCHS: arm64
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+  configs:
+    Release:
+      # Notarization rejects get-task-allow; Xcode injects it into ad-hoc builds by default.
+      CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+targets:
+  MetricsKit:
+    type: framework.static
+    platform: macOS
+    sources: [Sources/MetricsKit]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serhadtekkol.MetricsKit
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - sdk: IOKit.framework
+  SystemMetrics:
+    type: application
+    platform: macOS
+    sources: [Sources/SystemMetrics]
+    dependencies:
+      - target: MetricsKit
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serhadtekkol.SystemMetrics
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_CFBundleDisplayName: SystemMetrics
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+  MetricsKitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [Tests/MetricsKitTests]
+    dependencies:
+      - target: MetricsKit
+        embed: false
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  SystemMetrics:
+    build:
+      targets:
+        SystemMetrics: all
+        MetricsKitTests: [test]
+    test:
+      targets: [MetricsKitTests]

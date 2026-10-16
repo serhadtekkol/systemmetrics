@@ -1,0 +1,32 @@
+name: ci
+on: [push, pull_request]
+
+# Read-only token: this workflow only checks out and tests. Nothing here needs to write.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    env:
+      CI: "1"
+      # Pinned with its release-asset digest; bump both together.
+      XCODEGEN_VERSION: "2.46.0"
+      XCODEGEN_SHA256: "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+    steps:
+      # Pinned to a commit, not a movable tag: a re-pointed tag cannot change what runs here.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install XcodeGen (pinned, checksum-verified)
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/xcodegen"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          echo "${XCODEGEN_SHA256}  $dir/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$dir/xcodegen.zip" -d "$dir"
+          echo "$dir/xcodegen/bin" >> "$GITHUB_PATH"
+      - run: xcodegen --version
+      - run: ./scripts/test.sh
