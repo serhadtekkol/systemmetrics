@@ -86,9 +86,14 @@ extension MetricsEngine {
                                    hostInfo: HostInfo(modelName: "MacBook Pro", chip: "Apple M3 Pro",
                                                       bootTime: Date(timeIntervalSinceNow: -(3 * 86_400 + 4 * 3_600))))
         let n = 150
-        let cpu = (0..<n).map { 0.28 + 0.12 * sin(Double($0) / 9) + 0.05 * sin(Double($0) / 2.3) }
-        let memory = (0..<n).map { 0.71 + 0.02 * sin(Double($0) / 15) }
-        let gpuHistory = gpu ? (0..<n).map { 0.14 + 0.1 * sin(Double($0) / 5) } : []
+        let cpu: [Double] = (0..<n).map { i -> Double in
+            let x = Double(i)
+            let slow: Double = 0.12 * sin(x / 9)
+            let fast: Double = 0.05 * sin(x / 2.3)
+            return 0.28 + slow + fast
+        }
+        let memory: [Double] = (0..<n).map { i -> Double in 0.71 + 0.02 * sin(Double(i) / 15) }
+        let gpuHistory: [Double] = gpu ? (0..<n).map { i -> Double in 0.14 + 0.1 * sin(Double(i) / 5) } : []
         let snapshot = SystemSnapshot(
             timestamp: Date(),
             cpu: CPUSnapshot(total: cpu.last ?? 0.3,
