@@ -75,8 +75,14 @@ final class PanelController {
 
         hosting = NSHostingView(rootView: AnyView(EmptyView()))
         // The controller sizes the window explicitly; letting SwiftUI drive window min/max size
-        // would stop the panel from shrinking below its content on short screens.
-        hosting.sizingOptions = []
+        // would stop the panel from shrinking below its content on short screens. The intrinsic
+        // size is still needed: `fittingSize` is what the window is sized from, and without it the
+        // panel opens at 0×0. Low priorities let the window cut the content on short screens.
+        hosting.sizingOptions = [.intrinsicContentSize]
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            hosting.setContentCompressionResistancePriority(.defaultLow, for: axis)
+            hosting.setContentHuggingPriority(.defaultLow, for: axis)
+        }
         hosting.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(hosting)
         NSLayoutConstraint.activate([
