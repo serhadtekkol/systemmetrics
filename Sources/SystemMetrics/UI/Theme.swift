@@ -87,6 +87,15 @@ enum Theme {
 
     /// The one curve used for value changes; callers drop it when Reduce Motion is on.
     static let valueAnimation = Animation.smooth(duration: 0.35)
+    /// Panel entrance.
+    static let panelAnimation = Animation.spring(response: 0.34, dampingFraction: 0.8)
+    /// Switching between this Mac and the remote one.
+    static let tabAnimation = Animation.spring(response: 0.32, dampingFraction: 0.86)
+    /// Selected segment of the host switch: white on light, raised grey on dark (iOS style).
+    static let segmentFill = Color(nsColor: NSColor(name: "SystemMetrics.segmentFill") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(white: 0.42, alpha: 0.55) : .white
+    })
 }
 
 private extension NSAppearance {

@@ -16,6 +16,9 @@ struct PanelView: View {
 
     private var panelShape: RoundedRectangle { RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous) }
 
+    /// False for the first frame after the panel is mounted; the content then springs in.
+    @State private var appeared = false
+
     var body: some View {
         ScrollView(.vertical) { content }
             .scrollIndicators(.automatic)
@@ -24,6 +27,11 @@ struct PanelView: View {
             .background(.ultraThinMaterial, in: panelShape)
             .clipShape(panelShape)
             .overlay(panelShape.strokeBorder(Theme.hairline, lineWidth: 0.5))
+            // Control Center style entrance: grows down from the menu bar with a soft spring.
+            .scaleEffect(appeared ? 1 : 0.92, anchor: .top)
+            .offset(y: appeared ? 0 : -8)
+            .opacity(appeared ? 1 : 0)
+            .onAppear { withAnimation(Theme.panelAnimation) { appeared = true } }
     }
 
     private var content: some View {
@@ -33,9 +41,13 @@ struct PanelView: View {
             }
             if let remote, selection.showsRemote {
                 RemoteContent(remote: remote, onOpenSettings: onOpenSettings)
+                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .trailing))
+                        .combined(with: .opacity))
             } else {
                 MetricsContent(snapshot: engine.snapshot, history: engine.history, hostInfo: engine.hostInfo,
                                onOpenSettings: onOpenSettings)
+                    .transition(.asymmetric(insertion: .move(edge: .leading), removal: .move(edge: .leading))
+                        .combined(with: .opacity))
             }
         }
         .padding(Theme.Space.l)
@@ -53,24 +65,55 @@ final class PanelSelection {
     var showsRemote = false
 }
 
-/// "Bu Mac / <remote>" segmented control.
+/// "Bu Mac / <remote>" switch, iOS segmented-control style: a recessed track with a raised pill
+/// under the selected segment that slides between them. Drawn in SwiftUI rather than with the
+/// AppKit segmented control, which sized the status symbol and the selection badly in a panel.
 private struct HostPicker: View {
     let remote: RemoteMonitor
     @Bindable var selection: PanelSelection
+    @Namespace private var pill
 
     var body: some View {
-        Picker("Mac", selection: $selection.showsRemote) {
-            Text("Bu Mac").tag(false)
-            Label {
-                Text(verbatim: UntrustedText.clean(remote.host))
-            } icon: {
-                Image(systemName: remote.state == .connected ? "circle.fill" : "circle")
+        HStack(spacing: 0) {
+            segment(isRemote: false) { Text("Bu Mac") }
+            segment(isRemote: true) {
+                HStack(spacing: Theme.Space.xs + 1) {
+                    Circle()
+                        .fill(remote.state == .connected ? Theme.Load.normal : Theme.textSecondary.opacity(0.5))
+                        .frame(width: 6, height: 6)
+                    Text(verbatim: UntrustedText.clean(remote.host))
+                }
             }
-            .tag(true)
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.small)
+        .padding(2)
+        .background(Theme.chipFill, in: Capsule())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Mac")
+    }
+
+    private func segment(isRemote: Bool, @ViewBuilder label: () -> some View) -> some View {
+        let selected = selection.showsRemote == isRemote
+        return Button {
+            withAnimation(Theme.tabAnimation) { selection.showsRemote = isRemote }
+        } label: {
+            label()
+                .font(.system(size: 12, weight: selected ? .semibold : .medium))
+                .foregroundStyle(selected ? Color.primary : Theme.textSecondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .frame(height: 24)
+                .background {
+                    if selected {
+                        Capsule()
+                            .fill(Theme.segmentFill)
+                            .shadow(color: .black.opacity(0.12), radius: 1.5, y: 0.5)
+                            .matchedGeometryEffect(id: "pill", in: pill)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }
 

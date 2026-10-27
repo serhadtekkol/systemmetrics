@@ -16,6 +16,13 @@ enum Main {
             RunLoop.main.run()
             return
         }
+        #if DEBUG
+        if let i = CommandLine.arguments.firstIndex(of: "--render-panel"), i + 1 < CommandLine.arguments.count {
+            _ = NSApplication.shared
+            PanelSnapshot.render(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+            return
+        }
+        #endif
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         app.delegate = delegate

@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 import MetricsKit
 
@@ -71,7 +72,8 @@ final class PanelController {
         panel.hasShadow = true
         panel.hidesOnDeactivate = false      // hover mode shows it while another app is active
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-        panel.animationBehavior = .utilityWindow
+        // The entrance is a SwiftUI spring (PanelView); the system's fade would run on top of it.
+        panel.animationBehavior = .none
 
         hosting = NSHostingView(rootView: AnyView(EmptyView()))
         // The controller sizes the window explicitly; letting SwiftUI drive window min/max size
@@ -96,11 +98,19 @@ final class PanelController {
         container.onExit = { [weak self] in self?.onEvent?(.panelExited) }
     }
 
-    var isVisible: Bool { panel.isVisible }
+    /// False as soon as a hide starts, even while the panel is still fading out.
+    var isVisible: Bool { panel.isVisible && hideGeneration == nil }
     private var isPinned: Bool { panel.allowsKey }
 
     /// Shows the panel, or switches an already visible hover panel to pinned.
     func show(below anchor: NSRect, pinned: Bool) {
+        // Re-shown while fading out: cancel the fade and keep the content that is on screen.
+        if hideGeneration != nil {
+            hideGeneration = nil
+            panel.alphaValue = 1
+            restoresFocusOnHide = true
+            installDismissTriggers()
+        }
         if !panel.isVisible {
             hosting.rootView = makeContent()
             restoresFocusOnHide = true
@@ -131,7 +141,8 @@ final class PanelController {
         let y = anchor.minY - Self.anchorGap - size.height
         let frame = NSRect(origin: NSPoint(x: x, y: y), size: size)
         guard frame != panel.frame else { return }
-        panel.setFrame(frame, display: true)
+        // On screen, a new height (switching Macs, a disk appearing) glides instead of jumping.
+        panel.setFrame(frame, display: true, animate: panel.isVisible && panel.alphaValue == 1)
         // The shadow follows the rounded, transparent content; recompute it when the size changes.
         panel.invalidateShadow()
     }
@@ -150,12 +161,33 @@ final class PanelController {
         removeDismissTriggers()
         let wasPinned = isPinned
         panel.allowsKey = false
-        panel.orderOut(nil)
-        hosting.rootView = AnyView(EmptyView())
+        fadeOut()
         if wasPinned, restoresFocusOnHide, NSApp.isActive, let previousApp, !previousApp.isTerminated {
             previousApp.activate(from: .current, options: [])
         }
         previousApp = nil
+    }
+
+    /// Set while the panel fades out; a `show` in that window cancels the fade.
+    private var hideGeneration: UUID?
+    static let fadeOutDuration: TimeInterval = 0.14
+
+    private func fadeOut() {
+        let generation = UUID()
+        hideGeneration = generation
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.fadeOutDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.hideGeneration == generation else { return }
+                self.hideGeneration = nil
+                self.panel.orderOut(nil)
+                self.panel.alphaValue = 1
+                self.hosting.rootView = AnyView(EmptyView())
+            }
+        }
     }
 
     // MARK: Dismiss triggers (installed only while visible)
