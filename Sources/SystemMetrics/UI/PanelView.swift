@@ -137,6 +137,7 @@ private struct MetricsContent: View {
                     SwapCard(swap: snapshot.swap, compressed: snapshot.memory?.compressed)
                 }
             }
+            ProcessesCard(processes: snapshot.processes)
             DisksCard(volumes: snapshot.volumes)
             if snapshot.docker?.state != .notInstalled {
                 DockerCard(docker: snapshot.docker)
@@ -195,6 +196,7 @@ struct PanelLayoutKey: Equatable {
     var dockerOverflow: Bool
     var swap: Int                  // 0 = no data, 1 = none allocated, 2 = in use
     var hasCPU: Bool, hasMemory: Bool, hasGPU: Bool
+    var hasHiddenProcesses: Bool
 
     init(_ snapshot: SystemSnapshot) {
         volumeIDs = snapshot.volumes.map(\.id)
@@ -206,6 +208,7 @@ struct PanelLayoutKey: Equatable {
         hasCPU = snapshot.cpu != nil
         hasMemory = snapshot.memory != nil
         hasGPU = snapshot.gpu != nil
+        hasHiddenProcesses = (snapshot.processes?.unreadableCount ?? 0) > 0
     }
 }
 
@@ -246,7 +249,14 @@ extension MetricsEngine {
                                total: 1_000_000_000_000, available: 386_000_000_000,
                                readBytesPerSecond: 0, writeBytesPerSecond: 24_600_000, deviceID: "external"),
             ],
-            docker: docker)
+            docker: docker,
+            processes: ProcessesSnapshot(
+                topCPU: [ProcessUsage(name: "Xcode", processCount: 6, cpu: 0.62, memory: 2_100 << 20),
+                         ProcessUsage(name: "Safari", processCount: 9, cpu: 0.18, memory: 1_400 << 20),
+                         ProcessUsage(name: "Mail", processCount: 1, cpu: 0.04, memory: 310 << 20)],
+                topMemory: [ProcessUsage(name: "Xcode", processCount: 6, cpu: 0.62, memory: 2_100 << 20),
+                            ProcessUsage(name: "Safari", processCount: 9, cpu: 0.18, memory: 1_400 << 20)],
+                unreadableCount: 180))
         engine.setPreviewState(snapshot: snapshot, cpuHistory: cpu, memoryHistory: memory, gpuHistory: gpuHistory)
         return engine
     }

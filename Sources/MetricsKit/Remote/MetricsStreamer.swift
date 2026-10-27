@@ -33,12 +33,23 @@ public final class MetricsStreamer {
     public static func standardOutput(interval: TimeInterval) -> MetricsStreamer {
         // A closed pipe must surface as a write error, not kill the process mid-write.
         signal(SIGPIPE, SIG_IGN)
+        let streamer = MetricsStreamer(engine: MetricsEngine(refreshInterval: interval)) { data in
+            do { try FileHandle.standardOutput.write(contentsOf: data); return true } catch { return false }
+        }
+        Liveness.onDetailRequest = { [weak streamer] wanted in
+            DispatchQueue.main.async { MainActor.assumeIsolated { streamer?.setDetail(wanted) } }
+        }
         // Run by hand in a terminal there is no heartbeat; only a pipe (ssh) is supervised.
         if isatty(STDIN_FILENO) == 0 { Liveness.watchStandardInput(timeout: livenessTimeout) }
-        let out = FileHandle.standardOutput
-        return MetricsStreamer(engine: MetricsEngine(refreshInterval: interval)) { data in
-            do { try out.write(contentsOf: data); return true } catch { return false }
-        }
+        return streamer
+    }
+
+    /// Whether the reader's panel is open. Closed, only CPU and RAM are sampled (the same idle
+    /// budget as the menu bar app); open, everything. A reader that never says (an older build,
+    /// a terminal) gets everything.
+    func setDetail(_ wanted: Bool) {
+        guard engine.isPanelOpen != wanted else { return }
+        engine.isPanelOpen = wanted
     }
 
     public func start() {
@@ -87,6 +98,8 @@ enum Liveness {
     nonisolated(unsafe) private static var lastHeard = Date()
     nonisolated(unsafe) private static var timer: DispatchSourceTimer?
     nonisolated(unsafe) private static var heardAnything = false
+    /// Called with the reader's latest "o" (panel open) / "c" (closed) heartbeat.
+    nonisolated(unsafe) static var onDetailRequest: ((Bool) -> Void)?
 
     static func watchStandardInput(timeout: TimeInterval) {
         // Statics initialise lazily: without this the first read would happen inside the timer
@@ -106,7 +119,13 @@ enum Liveness {
                 }
                 return
             }
-            queue.async { lastHeard = Date(); heardAnything = true }
+            // Heartbeat lines: "o" panel open, "c" closed, empty from older readers.
+            let request: Bool? = data.last(where: { $0 == UInt8(ascii: "o") || $0 == UInt8(ascii: "c") })
+                .map { $0 == UInt8(ascii: "o") }
+            queue.async {
+                lastHeard = Date(); heardAnything = true
+                if let request { onDetailRequest?(request) }
+            }
         }
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now() + timeout, repeating: 5, leeway: .seconds(1))

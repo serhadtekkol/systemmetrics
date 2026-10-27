@@ -40,6 +40,7 @@ public struct RemoteFrame: Equatable, Sendable, Codable {
 
     static let maxCores = 256
     static let maxVolumes = 64
+    static let maxProcessRows = 10
 
     /// The frame with every value the UI relies on brought into range. The sender is another
     /// machine: its values must not be able to trap a formatter or make the panel build
@@ -71,6 +72,20 @@ public struct RemoteFrame: Equatable, Sendable, Codable {
             v.readBytesPerSecond = rate(v.readBytesPerSecond)
             v.writeBytesPerSecond = rate(v.writeBytesPerSecond)
             return v
+        }
+        if var processes = f.snapshot.processes {
+            func bound(_ rows: [ProcessUsage]) -> [ProcessUsage] {
+                rows.prefix(Self.maxProcessRows).map { row in
+                    var row = row
+                    row.cpu = row.cpu.flatMap { $0.isFinite ? min(max($0, 0), Double(Self.maxCores)) : nil }
+                    row.processCount = min(max(0, row.processCount), 100_000)
+                    return row
+                }
+            }
+            processes.topCPU = bound(processes.topCPU)
+            processes.topMemory = bound(processes.topMemory)
+            processes.unreadableCount = min(max(0, processes.unreadableCount), 100_000)
+            f.snapshot.processes = processes
         }
         if var docker = f.snapshot.docker {
             docker.containers = Array(docker.containers.prefix(DockerSampler.maxContainers))

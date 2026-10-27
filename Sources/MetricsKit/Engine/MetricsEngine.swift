@@ -13,18 +13,21 @@ public struct Samplers {
     public var volumes: (Date) -> [VolumeSnapshot]
     /// Called off the main actor's critical path; must return within a few seconds.
     public var docker: (Date) async -> DockerSnapshot
+    public var processes: (Date) -> ProcessesSnapshot?
     public init(cpu: @escaping () -> CPUSnapshot?, memory: @escaping () -> MemorySnapshot?,
                 swap: @escaping () -> SwapSnapshot?, gpu: @escaping () -> GPUSnapshot?,
-                volumes: @escaping (Date) -> [VolumeSnapshot], docker: @escaping (Date) async -> DockerSnapshot) {
+                volumes: @escaping (Date) -> [VolumeSnapshot], docker: @escaping (Date) async -> DockerSnapshot,
+                processes: @escaping (Date) -> ProcessesSnapshot? = { _ in nil }) {
         self.cpu = cpu; self.memory = memory; self.swap = swap; self.gpu = gpu; self.volumes = volumes; self.docker = docker
+        self.processes = processes
     }
 
     /// The real samplers. CPU primes itself on creation so the first tick already has a value.
     public static func live() -> Samplers {
         let cpu = CPUSampler(), memory = MemorySampler(), swap = SwapSampler()
-        let gpu = GPUSampler(), disks = DiskSampler(), docker = DockerSampler()
+        let gpu = GPUSampler(), disks = DiskSampler(), docker = DockerSampler(), processes = ProcessSampler()
         return Samplers(cpu: cpu.sample, memory: memory.sample, swap: swap.sample, gpu: gpu.sample,
-                        volumes: disks.sample(now:), docker: docker.sample(now:))
+                        volumes: disks.sample(now:), docker: docker.sample(now:), processes: processes.sample(now:))
     }
 }
 
@@ -146,6 +149,7 @@ public final class MetricsEngine {
             next.swap = samplers.swap()
             next.gpu = samplers.gpu()
             next.volumes = samplers.volumes(now)
+            next.processes = samplers.processes(now)
         }
         snapshot = next
         // History capacity encodes ~5 minutes at one point per interval. Off-schedule ticks

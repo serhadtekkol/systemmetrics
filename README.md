@@ -18,6 +18,7 @@ Görüntüler örnek (uydurma) verilerle oluşturuldu; gerçek bir makineye ait 
 | **RAM** | Kullanılan / toplam bellek ve bellek basıncı (normal / uyarı / kritik) |
 | **GPU** | Kullanım yüzdesi ve GPU'nun tuttuğu birleşik bellek |
 | **Swap** | Kullanılan swap, ayrılan swap ve sıkıştırılmış bellek |
+| **En çok kullananlar** | CPU'ya veya belleğe göre ilk 5 uygulama. Bir uygulamanın yardımcı süreçleri tek satırda toplanır (ör. `Google Chrome ×24`). CPU yüzdesi bir çekirdeğe göredir, Etkinlik Monitörü'ndeki gibi 100%'ü geçebilir. Bellek, Etkinlik Monitörü'ndeki "Bellek" sütunudur (fiziksel ayak izi). Sistemin ve başka kullanıcıların süreçleri (WindowServer, kernel_task…) izin gerektirdiği için listede yer almaz. |
 | **Diskler** | Dahili ve harici her birim için dolu / toplam alan, okuma ve yazma hızı |
 | **Docker** | Konteynerlerin toplam CPU'su (vCPU) ve RAM'i, Docker VM'inin boyutu, Docker'ın disk kullanımı, RAM'e göre sıralı konteyner listesi (en fazla 6 satır) |
 
@@ -43,8 +44,8 @@ Ayarlar penceresinde şunlar var:
 | Uzak Mac | Boş (varsayılan) ya da bir SSH adı (`~/.ssh/config` içindeki `Host`, makine adı veya `kullanıcı@makine`). Ayrıntılar [Uzak Mac](#uzak-mac) bölümünde. |
 | Girişte başlat | Açık / kapalı. Oturum açıldığında uygulamayı başlatır. Ayarlanamazsa sebebi pencerede gösterilir. |
 
-Panel kapalıyken yalnızca menü çubuğundaki iki değer (CPU ve RAM) ölçülür. GPU, swap, disk ve
-Docker yalnızca panel açıkken okunur.
+Panel kapalıyken yalnızca menü çubuğundaki iki değer (CPU ve RAM) ölçülür. GPU, swap, disk,
+süreç listesi ve Docker yalnızca panel açıkken okunur.
 
 ## Gereksinimler
 

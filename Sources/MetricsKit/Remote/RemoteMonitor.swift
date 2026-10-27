@@ -45,6 +45,11 @@ public final class RemoteMonitor {
     public private(set) var snapshot: SystemSnapshot = .empty
     public private(set) var hostInfo: HostInfo?
     public private(set) var history: History
+    /// Set while the panel is open: the remote side then samples everything (GPU, disks,
+    /// processes, Docker); otherwise only CPU and RAM, to keep its idle cost low.
+    @ObservationIgnored public var wantsDetail = false {
+        didSet { if wantsDetail != oldValue { sendHeartbeat() } }
+    }
 
     @ObservationIgnored private let interval: TimeInterval
     @ObservationIgnored private var process: Process?
@@ -141,6 +146,7 @@ public final class RemoteMonitor {
         do {
             try p.run()
             process = p
+            sendHeartbeat()
             startWatchdog()
         } catch {
             Self.closePipes(of: p)
@@ -252,6 +258,15 @@ public final class RemoteMonitor {
         }
     }
 
+    /// "o\n" (panel open) or "c\n" (closed). Also proves to the remote side that we are alive.
+    /// Fails harmlessly (EPIPE, SIGPIPE ignored) when ssh has just exited; the termination
+    /// handler deals with that.
+    private func sendHeartbeat(to p: Process? = nil) {
+        guard let p = p ?? process else { return }
+        let line = Data((wantsDetail ? "o\n" : "c\n").utf8)
+        try? (p.standardInput as? Pipe)?.fileHandleForWriting.write(contentsOf: line)
+    }
+
     private func startWatchdog() {
         watchdog?.invalidate()
         let started = Date()
@@ -260,9 +275,7 @@ public final class RemoteMonitor {
                 guard let self, let p = self.process else { return }
                 let since = Date().timeIntervalSince(self.lastFrame ?? started)
                 if since > Self.staleAfter { self.drop("Karşı Mac yanıt vermiyor."); return }
-                // Heartbeat for the remote side. Fails harmlessly (EPIPE, SIGPIPE ignored) when
-                // ssh has just exited; the termination handler deals with that.
-                try? (p.standardInput as? Pipe)?.fileHandleForWriting.write(contentsOf: Data([0x0A]))
+                self.sendHeartbeat(to: p)
             }
         }
         t.tolerance = 1

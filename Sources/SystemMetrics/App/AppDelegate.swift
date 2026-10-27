@@ -66,11 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     continue
                 }
                 engine.isPanelOpen = true
+                remote?.wantsDetail = true
                 panel.show(below: anchor, pinned: pinned)
                 panelLayout = currentShape()
             case .hidePanel:
                 panel.hide()
                 engine.isPanelOpen = false
+                remote?.wantsDetail = false
                 panelLayout = nil
                 // Ordering a window out under the pointer does not reliably deliver mouseExited;
                 // re-read the pointer so the next hover starts from the truth.
@@ -125,6 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         remoteStarted = true
         remote?.stop()
         remote = host.map { RemoteMonitor(host: $0, interval: 2) }
+        remote?.wantsDetail = panel.isVisible
         remote?.start()
         if remote == nil { selection.showsRemote = false }
         // The panel's content captured the old monitor; remount it with the new one.

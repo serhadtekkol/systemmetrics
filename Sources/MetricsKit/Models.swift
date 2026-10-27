@@ -92,6 +92,33 @@ public struct DockerSnapshot: Equatable, Sendable, Codable {
     public static let notInstalled = DockerSnapshot(state: .notInstalled)
 }
 
+/// One app (all of its helper processes together) or one standalone process.
+public struct ProcessUsage: Equatable, Sendable, Codable, Identifiable {
+    public var id: String { name }
+    public var name: String
+    /// Processes summed into this row (an app's helpers count here).
+    public var processCount: Int
+    /// CPU since the previous sample, as a fraction of one core (1.0 = 100%, can exceed 1).
+    /// `nil` on the first sample after the panel opens, before there is a window to measure.
+    public var cpu: Double?
+    /// Physical footprint (what Activity Monitor calls Memory), summed.
+    public var memory: UInt64
+    public init(name: String, processCount: Int, cpu: Double?, memory: UInt64) {
+        self.name = name; self.processCount = processCount; self.cpu = cpu; self.memory = memory
+    }
+}
+
+public struct ProcessesSnapshot: Equatable, Sendable, Codable {
+    public var topCPU: [ProcessUsage]
+    public var topMemory: [ProcessUsage]
+    /// Processes of other users and of the system (WindowServer, kernel_task…) that an
+    /// unprivileged app cannot read; they are not in the lists.
+    public var unreadableCount: Int
+    public init(topCPU: [ProcessUsage], topMemory: [ProcessUsage], unreadableCount: Int) {
+        self.topCPU = topCPU; self.topMemory = topMemory; self.unreadableCount = unreadableCount
+    }
+}
+
 public struct SystemSnapshot: Equatable, Sendable, Codable {
     public var timestamp: Date
     public var cpu: CPUSnapshot?
@@ -100,11 +127,13 @@ public struct SystemSnapshot: Equatable, Sendable, Codable {
     public var gpu: GPUSnapshot?
     public var volumes: [VolumeSnapshot]
     public var docker: DockerSnapshot?          // nil = not sampled yet
+    /// Top apps by CPU and memory; nil = not sampled yet (or a peer from before this field).
+    public var processes: ProcessesSnapshot?
     public init(timestamp: Date = .distantPast, cpu: CPUSnapshot? = nil, memory: MemorySnapshot? = nil,
                 swap: SwapSnapshot? = nil, gpu: GPUSnapshot? = nil, volumes: [VolumeSnapshot] = [],
-                docker: DockerSnapshot? = nil) {
+                docker: DockerSnapshot? = nil, processes: ProcessesSnapshot? = nil) {
         self.timestamp = timestamp; self.cpu = cpu; self.memory = memory; self.swap = swap
-        self.gpu = gpu; self.volumes = volumes; self.docker = docker
+        self.gpu = gpu; self.volumes = volumes; self.docker = docker; self.processes = processes
     }
     public static let empty = SystemSnapshot()
 }
