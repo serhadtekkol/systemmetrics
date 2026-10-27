@@ -27,12 +27,71 @@ struct RemoteProtocolQATests {
         #expect(throws: RemoteFrame.DecodeError.incompatibleVersion(2)) { try RemoteFrame.decode(line: line) }
     }
 
-    /// JSONEncoder refuses non-finite doubles; `MetricsStreamer.emit` then drops the frame
-    /// silently (`try?`). Pinned here so the behaviour is a known fact, not a surprise.
-    @Test func nonFiniteValueCannotBeEncoded() {
+    /// JSONEncoder still refuses non-finite doubles (a fact about Foundation, pinned here).
+    @Test func rawNonFiniteValueCannotBeEncoded() {
         var frame = RemoteFrameTests.sample
         frame.snapshot.gpu = GPUSnapshot(utilization: .nan, memoryInUse: 0)
         #expect(throws: EncodingError.self) { try frame.encodedLine() }
+    }
+
+    /// Regression for systemmetrics-59: the sender runs `validated()` before encoding, so a
+    /// NaN/Inf anywhere in a snapshot no longer stops every frame.
+    @Test func validatedFrameWithEveryDoubleNonFiniteEncodesAndRoundTrips() throws {
+        var frame = RemoteFrameTests.sample
+        frame.host.bootTime = Date(timeIntervalSinceReferenceDate: .nan)
+        frame.snapshot.timestamp = Date(timeIntervalSinceReferenceDate: .infinity)
+        frame.snapshot.cpu = CPUSnapshot(total: .nan, perCore: [.nan, .infinity, -.infinity, 0.5], efficiencyCoreCount: 2)
+        frame.snapshot.gpu = GPUSnapshot(utilization: -.infinity, memoryInUse: 0)
+        frame.snapshot.volumes[0].readBytesPerSecond = .nan
+        frame.snapshot.volumes[0].writeBytesPerSecond = .infinity
+        frame.snapshot.docker?.containers = [ContainerSnapshot(id: "a", name: "db", cpuPercent: .nan, memory: 1)]
+        let now = Date()
+        let line = try frame.validated(now: now).encodedLine()
+        let decoded = try RemoteFrame.decode(line: line.dropLast())
+        #expect(decoded.host.bootTime == nil)
+        #expect(decoded.snapshot.cpu == CPUSnapshot(total: 0, perCore: [0, 0, 0, 0.5], efficiencyCoreCount: 2))
+        #expect(decoded.snapshot.gpu?.utilization == 0)
+        #expect(decoded.snapshot.volumes[0].readBytesPerSecond == nil && decoded.snapshot.volumes[0].writeBytesPerSecond == nil)
+        #expect(decoded.snapshot.docker?.containers.first?.cpuPercent == nil)
+    }
+
+    /// Regression for systemmetrics-55: version is probed before the shape.
+    @Test func bareVersionOnlyLineIsVersionMismatch() {
+        #expect(throws: RemoteFrame.DecodeError.incompatibleVersion(3)) { try RemoteFrame.decode(line: Data(#"{"version":3}"#.utf8)) }
+        #expect(throws: RemoteFrame.DecodeError.incompatibleVersion(0)) { try RemoteFrame.decode(line: Data(#"{"version":0,"x":1}"#.utf8)) }
+    }
+
+    @Test(arguments: [#"{"host":{}}"#, #"{"version":"1"}"#, #"{"version":1e30}"#, #"[1]"#, #"{"version":null}"#])
+    func lineWithoutUsableVersionIsGarbageNotMismatch(_ text: String) {
+        #expect(throws: (any Error).self) { try RemoteFrame.decode(line: Data(text.utf8)) }
+        do { _ = try RemoteFrame.decode(line: Data(text.utf8)) } catch {
+            #expect(!(error is RemoteFrame.DecodeError), "\(text) -> \(error)")
+        }
+    }
+
+    /// Regression for systemmetrics-48 with the values from the original finding.
+    @Test func hostileFrameFromFindingDoesNotTrapTheUIPaths() throws {
+        let frame = try RemoteFrameValidationTests.decode { json in
+            var host = json["host"] as! [String: Any]
+            host["bootTime"] = 1e300
+            json["host"] = host
+            var snap = json["snapshot"] as! [String: Any]
+            snap["timestamp"] = -1e300
+            var cpu = snap["cpu"] as! [String: Any]
+            cpu["efficiencyCoreCount"] = Int.min
+            cpu["perCore"] = Array(repeating: 0.5, count: 5_000)
+            snap["cpu"] = cpu
+            json["snapshot"] = snap
+        }
+        let cpu = try #require(frame.snapshot.cpu)
+        #expect(cpu.efficiencyCores.isEmpty && cpu.performanceCores.count == RemoteFrame.maxCores)
+        #expect(frame.host.bootTime == nil)
+        // A boot time slightly in the future (clock skew, still accepted) must read as "0dk".
+        let now = Date()
+        let skewed = RemoteFrame(host: HostInfo(modelName: "x", chip: "y", bootTime: now.addingTimeInterval(3_600)),
+                                 snapshot: SystemSnapshot(timestamp: now)).validated(now: now)
+        let boot = try #require(skewed.host.bootTime)
+        #expect(Formatters.uptime(since: boot, now: now) == "0dk")
     }
 
     @Test func manyContainersStayBelowLineCapAndAreCappedOnReceive() throws {
@@ -98,9 +157,116 @@ struct RemoteDescribeQATests {
                 .contains("SystemMetrics"))
     }
 
+    @Test func sshPublickeyRefusalIsStillReportedAsBadKey() {
+        #expect(d("mini: Permission denied (publickey,password,keyboard-interactive).") == "SSH anahtarı kabul edilmedi.")
+    }
+
+    /// Regression for systemmetrics-56/57: only status 3 *and* the marker mean "old or missing app".
+    @Test func missingAppNeedsBothStatusAndMarker() {
+        let missing = "Karşı Mac'te SystemMetrics yok ya da eski; aynı sürümü kurun."
+        #expect(d(RemoteMonitor.missingAppMarker + "\n", RemoteMonitor.missingAppStatus) == missing)
+        #expect(d("", RemoteMonitor.missingAppStatus) != missing)
+        #expect(d(RemoteMonitor.missingAppMarker, 255) != missing)
+        #expect(d("zsh:1: no such file or directory: /Applications/SystemMetrics.app/Contents/MacOS/SystemMetrics", 127) != missing)
+    }
+
     @Test func hostKeyChangedIsExplained() {
         #expect(d("@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\nHost key verification failed.")
                 .hasPrefix("Karşı Mac'in SSH anahtarı"))
+    }
+}
+
+/// Regression for systemmetrics-56: `RemoteMonitor.remoteCommand` run by the remote login shell
+/// (zsh on macOS, sh for good measure) against a fake app in a temp dir. /Applications is never
+/// touched: the app path in the command is replaced.
+@MainActor
+struct RemoteCommandQATests {
+    static let appPath = "/Applications/SystemMetrics.app"
+
+    struct Run { var status: Int32; var out: String; var err: String }
+
+    /// `version` nil: no Info.plist / no app at all.
+    func run(shell: String, version: String?, makeApp: Bool = true) throws -> Run {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("qa-remotecmd-\(UUID().uuidString)")
+        let app = dir.appendingPathComponent("SystemMetrics.app")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        if makeApp {
+            let macos = app.appendingPathComponent("Contents/MacOS")
+            try FileManager.default.createDirectory(at: macos, withIntermediateDirectories: true)
+            let exe = macos.appendingPathComponent("SystemMetrics")
+            try Data("#!/bin/sh\necho \"fake-stream $*\"\n".utf8).write(to: exe)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: exe.path)
+            if let version {
+                let plist: [String: Any] = ["CFBundleVersion": version]
+                let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+                try data.write(to: app.appendingPathComponent("Contents/Info.plist"))
+            }
+        } else {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        let command = RemoteMonitor.remoteCommand.replacingOccurrences(of: Self.appPath, with: app.path)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: shell)
+        p.arguments = ["-c", command]
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out; p.standardError = err
+        p.standardInput = FileHandle.nullDevice
+        try p.run()
+        let o = out.fileHandleForReading.readDataToEndOfFile(), e = err.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return Run(status: p.terminationStatus, out: String(decoding: o, as: UTF8.self), err: String(decoding: e, as: UTF8.self))
+    }
+
+    @Test func commandNamesTheInstalledAppExactlyOnce() {
+        #expect(RemoteMonitor.remoteCommand.components(separatedBy: Self.appPath).count == 2)
+    }
+
+    @Test(arguments: ["/bin/zsh", "/bin/sh"])
+    func currentBuildIsExecWithStream(_ shell: String) throws {
+        for v in ["2", "10"] {
+            let r = try run(shell: shell, version: v)
+            #expect(r.status == 0 && r.out == "fake-stream --stream\n" && r.err.isEmpty, "\(shell) v=\(v): \(r)")
+        }
+    }
+
+    @Test(arguments: ["/bin/zsh", "/bin/sh"])
+    func oldOrUnreadableBuildExits3WithMarker(_ shell: String) throws {
+        for v: String? in ["1", "0", "", "abc", "1.9", nil] {
+            let r = try run(shell: shell, version: v)
+            #expect(r.status == RemoteMonitor.missingAppStatus, "\(shell) v=\(String(describing: v)): \(r)")
+            #expect(r.out.isEmpty, "old build must not be started: \(r.out)")
+            #expect(r.err.contains(RemoteMonitor.missingAppMarker))
+            #expect(RemoteMonitor.describe(status: r.status, stderr: Data(r.err.utf8)).contains("yok ya da eski"))
+        }
+    }
+
+    @Test func missingAppExits3WithMarker() throws {
+        let r = try run(shell: "/bin/zsh", version: nil, makeApp: false)
+        #expect(r.status == RemoteMonitor.missingAppStatus && r.out.isEmpty && r.err.contains(RemoteMonitor.missingAppMarker), "\(r)")
+    }
+}
+
+/// Regression for systemmetrics-59, through the real sender: a sampler that reports NaN must
+/// still produce frames.
+@MainActor
+struct MetricsStreamerNaNQATests {
+    @Test func nanFromSamplersStillProducesFrames() async throws {
+        var lines: [Data] = []
+        let samplers = Samplers(cpu: { CPUSnapshot(total: .nan, perCore: [.nan, 0.5], efficiencyCoreCount: 1) },
+                                memory: { MemorySnapshot(total: 10, used: 5, app: 5, wired: 0, compressed: 0, pressure: .normal) },
+                                swap: { SwapSnapshot(total: 2, used: 1) },
+                                gpu: { GPUSnapshot(utilization: .nan, memoryInUse: 1) },
+                                volumes: { _ in [] },
+                                docker: { _ in DockerSnapshot(state: .running) })
+        let engine = MetricsEngine(refreshInterval: 1, samplers: samplers,
+                                   hostInfo: HostInfo(modelName: "Fake", chip: "M0", bootTime: nil))
+        let streamer = MetricsStreamer(engine: engine) { lines.append($0); return true }
+        streamer.start()
+        try await Task.sleep(for: .seconds(3.5))
+        engine.stop()
+        #expect(lines.count >= 2, "frames: \(lines.count)")
+        let frames = try lines.map { try RemoteFrame.decode(line: $0.dropLast()) }
+        #expect(frames.allSatisfy { ($0.snapshot.gpu?.utilization ?? 0).isFinite && ($0.snapshot.cpu?.total ?? 0) == 0 })
     }
 }
 
@@ -116,9 +282,9 @@ struct MetricsStreamerQATests {
                  docker: { _ in try? await Task.sleep(for: dockerDelay); return DockerSnapshot(state: .running) })
     }
 
-    func frames(dockerDelay: Duration, seconds: Double) async throws -> [RemoteFrame] {
+    func frames(dockerDelay: Duration, seconds: Double, interval: TimeInterval = 1) async throws -> [RemoteFrame] {
         var lines: [Data] = []
-        let engine = MetricsEngine(refreshInterval: 1, samplers: Self.samplers(dockerDelay: dockerDelay),
+        let engine = MetricsEngine(refreshInterval: interval, samplers: Self.samplers(dockerDelay: dockerDelay),
                                    hostInfo: HostInfo(modelName: "Fake", chip: "M0", bootTime: nil))
         let streamer = MetricsStreamer(engine: engine) { lines.append($0); return true }
         streamer.start()
@@ -127,8 +293,12 @@ struct MetricsStreamerQATests {
         return try lines.map { try RemoteFrame.decode(line: $0.dropLast()) }
     }
 
+    // Load tolerance: both cases keep a wide margin around `coalesceDelay` (0.25 s), because
+    // under full-suite load the 0.25 s coalescing sleep itself can run late. Coalescing is a
+    // best-effort optimisation (fewer frames), not a correctness property, so a late timer
+    // merging a slow Docker result into the tick frame is acceptable product behaviour.
     @Test func fastDockerIsCoalescedIntoTheTickFrame() async throws {
-        let f = try await frames(dockerDelay: .milliseconds(50), seconds: 5.5)
+        let f = try await frames(dockerDelay: .zero, seconds: 5.5)
         let ticks = Set(f.map(\.snapshot.timestamp)).count
         // One frame per tick: no tick timestamp appears twice.
         #expect(f.count == ticks, "frames=\(f.count) distinct ticks=\(ticks)")
@@ -136,10 +306,14 @@ struct MetricsStreamerQATests {
     }
 
     @Test func slowDockerProducesASecondFrameForTheSameTick() async throws {
-        // Docker landing > coalesceDelay after the tick goes out as its own frame.
-        let f = try await frames(dockerDelay: .milliseconds(600), seconds: 5.5)
+        // Docker landing well after coalesceDelay (1.5 s vs 0.25 s) goes out as its own frame.
+        // Timeline (interval 3 s, Docker every 4 s): ticks at 0, 3, 6, 9. The ticks at 0 run
+        // before the streamer observes, so the first frame is Docker's (≈1.5 s, tick-0 stamp).
+        // Docker is due again at 6 and lands at ≈7.5, after the tick-6 frame went out at ≈6.25:
+        // that tick's stamp appears twice. 10 s leaves 2.5 s of slack after it.
+        let f = try await frames(dockerDelay: .milliseconds(1_500), seconds: 10, interval: 3)
         let ticks = Set(f.map(\.snapshot.timestamp)).count
-        #expect(f.count > ticks, "frames=\(f.count) distinct ticks=\(ticks)")
+        #expect(f.count > ticks, "frames=\(f.count) distinct ticks=\(ticks) \(f.map { ($0.snapshot.timestamp.timeIntervalSince1970, String(describing: $0.snapshot.docker?.state)) })")
     }
 }
 
@@ -224,6 +398,30 @@ struct RemoteMonitorLiveQATests {
         m.stop()
         let t = try await transitions(m, for: 4)
         #expect(connectStarts(t).isEmpty, "\(t)")
+    }
+
+    func openDescriptors() -> Int { (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? -1 }
+
+    /// Regression for systemmetrics-49: neither failed attempts nor a stop() while ssh is still
+    /// connecting (a host change in Settings) may leave descriptors behind.
+    @Test func failedAndAbandonedAttemptsDoNotLeakDescriptors() async throws {
+        let before = openDescriptors()
+        for _ in 0..<40 {
+            let m = RemoteMonitor(host: "qa-no-such-host.invalid")
+            m.start()
+            for _ in 0..<200 { if case .failed = m.state { break }; try await Task.sleep(for: .milliseconds(10)) }
+            m.stop()
+        }
+        for _ in 0..<15 {
+            let m = RemoteMonitor(host: "192.0.2.1")
+            m.start()
+            try await Task.sleep(for: .milliseconds(300))
+            m.stop()                         // ssh still in ConnectTimeout; monitor released right away
+        }
+        try await Task.sleep(for: .seconds(2))
+        let after = openDescriptors()
+        note("QA fds before/after 55 attempts:", before, after)
+        #expect(after - before <= 3, "fds \(before) -> \(after)")
     }
 
     @Test(.enabled(if: liveHost != nil)) func connectsRecordsHistoryOncePerIntervalAndCleansUp() async throws {

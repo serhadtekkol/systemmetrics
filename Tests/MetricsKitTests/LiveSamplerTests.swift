@@ -333,11 +333,12 @@ struct LiveSamplerTests {
         try await Task.sleep(for: .seconds(1))
         e.tick(now: Date())                         // the timer tick: a real 1 s window
         let timerSample = try #require(e.snapshot.cpu)
-        #expect(!timerSample.perCore.allSatisfy { $0 == 0 || $0 == 1 })   // sanity: real window is not quantized
         e.isPanelOpen = true                         // hover-open a few µs later
         let openSample = try #require(e.snapshot.cpu)
-        #expect(!openSample.perCore.allSatisfy { $0 == 0 || $0 == 1 },
-                "per-core after panel open: \(openSample.perCore)")
+        // Load-independent: the open tick must reuse the timer's 1 s sample, not resample over a few ms.
+        // (Not-quantized-ness of a real window is covered by the scripted CPUSampler test.)
+        #expect(openSample.total == timerSample.total, "total \(openSample.total) vs \(timerSample.total)")
+        #expect(openSample.perCore == timerSample.perCore, "per-core after panel open: \(openSample.perCore)")
         #expect(e.history.cpu.elements.count == 1, "the open tick must not add a second History point")
     }
 

@@ -76,7 +76,7 @@ struct RemoteHostValidationTests {
         #expect(d("user@x: Permission denied (publickey).") == "SSH anahtarı kabul edilmedi.")
         #expect(d("Host key verification failed.").hasPrefix("Karşı Mac'in SSH anahtarı"))
         #expect(d("ssh: Could not resolve hostname x: nodename nor servname provided").hasPrefix("Mac bulunamadı"))
-        #expect(d("ssh: connect to host x port 22: Operation timed out") == "Mac'e ulaşılamıyor.")
+        #expect(d("ssh: connect to host x port 22: Operation timed out") .hasPrefix("Mac'e ulaşılamıyor."))
         #expect(d("systemmetrics-stream-unavailable", 3).hasPrefix("Karşı Mac'te SystemMetrics yok ya da eski"))
         #expect(d("zsh:1: permission denied: /x/SystemMetrics", 126) == "Bağlantı kesildi.")
         #expect(d("", 0) == "Bağlantı kesildi.")

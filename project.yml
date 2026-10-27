@@ -42,6 +42,10 @@ targets:
         INFOPLIST_KEY_LSUIElement: YES
         INFOPLIST_KEY_CFBundleDisplayName: SystemMetrics
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        # Asked when the remote Mac (Settings > Uzak Mac) is on the local network. Without the
+        # key macOS blocks the ssh connection silently instead of asking.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Ayarlarda seçtiğiniz diğer Mac'in metriklerini SSH ile okumak için."
+
         MARKETING_VERSION: 0.2.0
         CURRENT_PROJECT_VERSION: 2
   MetricsKitTests:

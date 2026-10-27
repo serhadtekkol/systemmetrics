@@ -338,7 +338,7 @@ struct FixRoundVerificationTests {
     }
 
     /// Variation: cold start. The first value after `start()` must arrive within ~minimumWindow
-    /// (startup retry), not after a whole refresh interval, and must not be quantized.
+    /// (startup retry), not after a whole refresh interval, and and be a valid fraction.
     @MainActor
     @Test(.enabled(if: ProcessInfo.processInfo.environment["CI"] == nil))
     func coldStartGetsRealCPUValueQuickly() async throws {
@@ -348,7 +348,23 @@ struct FixRoundVerificationTests {
         #expect(e.snapshot.cpu == nil)
         try await Task.sleep(for: .seconds(CPUSampler.minimumWindow + 0.3))
         let cpu = try #require(e.snapshot.cpu, "no CPU value 0.8 s after start with a 5 s interval")
-        #expect(!cpu.perCore.allSatisfy { $0 == 0 || $0 == 1 }, "\(cpu.perCore)")
+        // Load-independent: under full load every core can legitimately read 1.0, so only validity is asserted here.
+        #expect(!cpu.perCore.isEmpty)
+        #expect(cpu.perCore.allSatisfy { $0.isFinite && (0...1).contains($0) }, "\(cpu.perCore)")
+        #expect((0...1).contains(cpu.total), "\(cpu.total)")
+    }
+
+    /// "Not quantized" belongs here, scripted: a ~1 s window with 37/100 busy ticks must yield 0.37,
+    /// not 0 or 1, regardless of machine load.
+    @Test func cpuSamplerRealWindowIsNotQuantized() throws {
+        let src = ScriptedTicks([[CPUTicks(user: 0, system: 0, idle: 0, nice: 0)],
+                                 [CPUTicks(user: 30, system: 7, idle: 63, nice: 0)]])
+        var now: TimeInterval = 100
+        let s = CPUSampler(source: src, efficiencyCoreCount: 0, clock: { now })
+        now = 101
+        let cpu = try #require(s.sample())
+        #expect(abs(cpu.total - 0.37) < 1e-9, "\(cpu.total)")
+        #expect(abs(try #require(cpu.perCore.first) - 0.37) < 1e-9, "\(cpu.perCore)")
     }
 
     private final class ScriptedTicks: CPUTickSource {

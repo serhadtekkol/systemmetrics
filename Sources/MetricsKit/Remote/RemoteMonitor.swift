@@ -284,7 +284,9 @@ public final class RemoteMonitor {
         if text.contains("could not resolve") { return "Mac bulunamadı (ad çözülemedi)." }
         if text.contains("timed out") || text.contains("no route") || text.contains("connection refused")
             || text.contains("network is unreachable") || text.contains("host is down") {
-            return "Mac'e ulaşılamıyor."
+            // macOS's Local Network privacy check drops the connection the same way an
+            // unreachable host does; the permission is the cause users can fix themselves.
+            return "Mac'e ulaşılamıyor. Açıksa, Sistem Ayarları > Gizlilik ve Güvenlik > Yerel Ağ'da SystemMetrics'e izin verin."
         }
         return "Bağlantı kesildi."
     }
