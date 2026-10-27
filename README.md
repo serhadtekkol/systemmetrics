@@ -40,6 +40,7 @@ Ayarlar penceresinde şunlar var:
 |---|---|
 | Güncelleme sıklığı | 1 / 2 / 5 sn (varsayılan 2 sn) |
 | Menü çubuğu | CPU ve RAM (varsayılan) / Yalnızca ikon / Yalnızca CPU / Yalnızca RAM |
+| Uzak Mac | Boş (varsayılan) ya da bir SSH adı (`~/.ssh/config` içindeki `Host`, makine adı veya `kullanıcı@makine`). Ayrıntılar [Uzak Mac](#uzak-mac) bölümünde. |
 | Girişte başlat | Açık / kapalı. Oturum açıldığında uygulamayı başlatır. Ayarlanamazsa sebebi pencerede gösterilir. |
 
 Panel kapalıyken yalnızca menü çubuğundaki iki değer (CPU ve RAM) ölçülür. GPU, swap, disk ve
@@ -181,6 +182,26 @@ rakamlarıdır.
 
 Docker, panel açıkken 4 saniyede bir okunur.
 
+## Uzak Mac
+
+Ayarlar'da **Uzak Mac** doluysa panelin üstünde iki sekme çıkar: **Bu Mac** ve o makine. Menü
+çubuğu her zaman bu Mac'in değerlerini gösterir.
+
+- Bağlantı sizin SSH kurulumunuzla yapılır (`/usr/bin/ssh`, anahtarlarınız, `known_hosts`).
+  Uygulama yeni port açmaz ve şifre sormaz. Anahtarı tanınmayan bir makineye bağlanmaz: önce
+  Terminal'den bir kez `ssh <ad>` ile bağlanıp makineyi onaylayın.
+- Karşı Mac'te de SystemMetrics `/Applications` içinde kurulu olmalı, aynı sürüm (0.2.0 veya
+  sonrası). Uygulama orada `SystemMetrics --stream` komutunu çalıştırır; bu mod menü çubuğunda
+  görünmez, iki saniyede bir tek satırlık JSON yazar ve bağlantı bitince kapanır.
+- Bu bağlantıda SSH agent'ı, X11 ve port yönlendirmeleri `~/.ssh/config` ne derse desin kapalıdır.
+- Bağlantı koparsa panel nedenini yazar, son gelen değerler görünmeye devam eder ve uygulama
+  2, 5, 10, 30, 60 saniye aralıklarla yeniden dener.
+- macOS "yerel ağdaki aygıtlar" iznini sorarsa izin verin; yoksa `.local` adlarına
+  bağlanılamaz.
+
+İki Mac'in birbirini göstermesi için her birinde diğerinin adını yazın (örneğin Air'de `mini`,
+Mac mini'de `air`).
+
 ## Rakamlar nasıl tanımlanır
 
 - **RAM kullanılan** = uygulama belleği + wired + sıkıştırılmış. Etkinlik Monitörü ile aynı
@@ -220,11 +241,15 @@ Uygulama App Sandbox olmadan çalışır; Docker soketine ve IOKit'e erişmek i�
 
 ## Gizlilik
 
-- Uygulama ağa bağlanmaz. Tek bağlantısı yerel Docker unix soketidir.
+- Uygulama internete bağlanmaz. Yerel Docker unix soketine ve, Uzak Mac ayarlıysa, yalnızca o
+  makineye SSH ile bağlanır. Karşı Mac'e giden tek şey sabit bir komuttur; gelen veri yalnızca
+  panelde gösterilir, kaydedilmez.
 - Telemetri veya kullanım verisi toplamaz.
 - Yalnızca Docker hatalarını sistem günlüğüne yazar (`com.serhadtekkol.SystemMetrics`,
   kategori `docker`, `info` düzeyi). Konteyner adları gizli (`private`) olarak işaretlenir;
   soket yolları ve yanıt içerikleri hiç yazılmaz.
+- Uzak Mac bağlantı hataları kategori `remote` altında yazılır; karşı makineden gelen hata metni
+  gizli (`private`) olarak işaretlenir.
 
 ## Katkı ve testler
 

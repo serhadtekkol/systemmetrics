@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import ServiceManagement
+import MetricsKit
 
 enum MenuBarContent: String, CaseIterable, Identifiable {
     case cpuAndMemory, iconOnly, cpuOnly, memoryOnly
@@ -36,6 +37,19 @@ final class AppSettings {
         }
     }
     var launchAtLoginError: String?
+    /// SSH destination of the other Mac shown in the panel (`Host` alias from ~/.ssh/config,
+    /// hostname or user@host). Empty: no remote Mac. Saved only when valid.
+    var remoteHost: String {
+        didSet {
+            let trimmed = remoteHost.trimmingCharacters(in: .whitespaces)
+            if trimmed != remoteHost { remoteHost = trimmed; return }
+            if remoteHost.isEmpty || RemoteMonitor.isValidHost(remoteHost) {
+                defaults.set(remoteHost, forKey: "remoteHost")
+            }
+        }
+    }
+    /// The host to connect to, or nil when the field is empty or not a valid destination.
+    var validRemoteHost: String? { RemoteMonitor.isValidHost(remoteHost) ? remoteHost : nil }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -43,5 +57,6 @@ final class AppSettings {
         refreshInterval = Self.intervals.contains(stored) ? stored : 2
         menuBarContent = defaults.string(forKey: "menuBarContent").flatMap(MenuBarContent.init) ?? .cpuAndMemory
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        remoteHost = defaults.string(forKey: "remoteHost") ?? ""
     }
 }

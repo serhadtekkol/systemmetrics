@@ -1,7 +1,7 @@
 import Foundation
 import IOKit
 
-public struct HostInfo: Equatable, Sendable {
+public struct HostInfo: Equatable, Sendable, Codable {
     public var modelName: String      // "Mac mini (2024)"
     public var chip: String           // "Apple M4"
     public var bootTime: Date?

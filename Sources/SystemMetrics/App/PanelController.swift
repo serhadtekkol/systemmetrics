@@ -136,6 +136,12 @@ final class PanelController {
         panel.invalidateShadow()
     }
 
+    /// Rebuilds the visible content (e.g. after the remote Mac changed in Settings).
+    func reloadContent() {
+        guard panel.isVisible else { return }
+        hosting.rootView = makeContent()
+    }
+
     /// Keeps the frontmost app where it is on the next hide (the user is going to a window of ours,
     /// e.g. Settings).
     func leaveFocusOnHide() { restoresFocusOnHide = false }

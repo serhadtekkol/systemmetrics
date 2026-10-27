@@ -9,9 +9,9 @@ struct HeaderView: View {
     var body: some View {
         HStack(spacing: Theme.Space.m) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: hostInfo.modelName)
+                Text(verbatim: UntrustedText.clean(hostInfo.modelName))
                     .font(Theme.Font.headline)
-                Text(verbatim: hostInfo.chip)
+                Text(verbatim: UntrustedText.clean(hostInfo.chip))
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.textSecondary)
             }

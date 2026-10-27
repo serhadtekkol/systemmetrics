@@ -1,19 +1,20 @@
 import Foundation
 
-public struct CPUSnapshot: Equatable, Sendable {
+public struct CPUSnapshot: Equatable, Sendable, Codable {
     public var total: Double
     public var perCore: [Double]
     public var efficiencyCoreCount: Int
     public init(total: Double, perCore: [Double], efficiencyCoreCount: Int) {
         self.total = total; self.perCore = perCore; self.efficiencyCoreCount = efficiencyCoreCount
     }
-    public var efficiencyCores: ArraySlice<Double> { perCore.prefix(min(efficiencyCoreCount, perCore.count)) }
-    public var performanceCores: ArraySlice<Double> { perCore.dropFirst(min(efficiencyCoreCount, perCore.count)) }
+    private var efficiencySplit: Int { min(max(0, efficiencyCoreCount), perCore.count) }
+    public var efficiencyCores: ArraySlice<Double> { perCore.prefix(efficiencySplit) }
+    public var performanceCores: ArraySlice<Double> { perCore.dropFirst(efficiencySplit) }
 }
 
-public enum MemoryPressure: Equatable, Sendable { case normal, warning, critical }
+public enum MemoryPressure: Equatable, Sendable, Codable { case normal, warning, critical }
 
-public struct MemorySnapshot: Equatable, Sendable {
+public struct MemorySnapshot: Equatable, Sendable, Codable {
     public var total: UInt64, used: UInt64, app: UInt64, wired: UInt64, compressed: UInt64
     public var pressure: MemoryPressure
     public init(total: UInt64, used: UInt64, app: UInt64, wired: UInt64, compressed: UInt64, pressure: MemoryPressure) {
@@ -23,19 +24,19 @@ public struct MemorySnapshot: Equatable, Sendable {
     public var usedFraction: Double { total == 0 ? 0 : min(1, Double(used) / Double(total)) }
 }
 
-public struct SwapSnapshot: Equatable, Sendable {
+public struct SwapSnapshot: Equatable, Sendable, Codable {
     public var total: UInt64, used: UInt64
     public init(total: UInt64, used: UInt64) { self.total = total; self.used = used }
     public var usedFraction: Double { total == 0 ? 0 : min(1, Double(used) / Double(total)) }
 }
 
-public struct GPUSnapshot: Equatable, Sendable {
+public struct GPUSnapshot: Equatable, Sendable, Codable {
     public var utilization: Double
     public var memoryInUse: UInt64
     public init(utilization: Double, memoryInUse: UInt64) { self.utilization = utilization; self.memoryInUse = memoryInUse }
 }
 
-public struct VolumeSnapshot: Equatable, Sendable, Identifiable {
+public struct VolumeSnapshot: Equatable, Sendable, Codable, Identifiable {
     public var id: String           // mount path
     public var name: String
     public var isInternal: Bool
@@ -59,9 +60,9 @@ public struct VolumeSnapshot: Equatable, Sendable, Identifiable {
     public var usedFraction: Double { total == 0 ? 0 : min(1, Double(used) / Double(total)) }
 }
 
-public enum DockerState: Equatable, Sendable { case notInstalled, notRunning, running }
+public enum DockerState: Equatable, Sendable, Codable { case notInstalled, notRunning, running }
 
-public struct ContainerSnapshot: Equatable, Sendable, Identifiable {
+public struct ContainerSnapshot: Equatable, Sendable, Codable, Identifiable {
     public var id: String, name: String
     public var cpuPercent: Double?    // percent of one core, may exceed 100
     public var memory: UInt64
@@ -70,7 +71,7 @@ public struct ContainerSnapshot: Equatable, Sendable, Identifiable {
     }
 }
 
-public struct DockerSnapshot: Equatable, Sendable {
+public struct DockerSnapshot: Equatable, Sendable, Codable {
     public var state: DockerState
     public var containers: [ContainerSnapshot]     // sorted by memory desc
     public var diskUsage: UInt64?                  // images + volumes + build cache + container rw
@@ -91,7 +92,7 @@ public struct DockerSnapshot: Equatable, Sendable {
     public static let notInstalled = DockerSnapshot(state: .notInstalled)
 }
 
-public struct SystemSnapshot: Equatable, Sendable {
+public struct SystemSnapshot: Equatable, Sendable, Codable {
     public var timestamp: Date
     public var cpu: CPUSnapshot?
     public var memory: MemorySnapshot?

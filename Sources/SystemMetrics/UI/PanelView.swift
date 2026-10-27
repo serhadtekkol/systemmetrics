@@ -10,6 +10,8 @@ import MetricsKit
 /// in `PanelController` (it knows which screen the panel is on).
 struct PanelView: View {
     let engine: MetricsEngine
+    var remote: RemoteMonitor? = nil
+    var selection: PanelSelection = PanelSelection()
     var onOpenSettings: () -> Void
 
     private var panelShape: RoundedRectangle { RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous) }
@@ -25,10 +27,63 @@ struct PanelView: View {
     }
 
     private var content: some View {
-        let snapshot = engine.snapshot
-        let history = engine.history
-        return VStack(spacing: Theme.Space.grid) {
-            HeaderView(hostInfo: engine.hostInfo, now: snapshot.timestamp, onOpenSettings: onOpenSettings)
+        VStack(spacing: Theme.Space.grid) {
+            if let remote {
+                HostPicker(remote: remote, selection: selection)
+            }
+            if let remote, selection.showsRemote {
+                RemoteContent(remote: remote, onOpenSettings: onOpenSettings)
+            } else {
+                MetricsContent(snapshot: engine.snapshot, history: engine.history, hostInfo: engine.hostInfo,
+                               onOpenSettings: onOpenSettings)
+            }
+        }
+        .padding(Theme.Space.l)
+        // Cards stretch to their row's height; measuring at ideal height keeps that stretch
+        // inside each grid row instead of letting it spill into the panel.
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Which Mac the panel shows. Owned by the app delegate so it survives the panel being
+/// unmounted between openings, and so the window is re-fitted when it changes.
+@MainActor
+@Observable
+final class PanelSelection {
+    var showsRemote = false
+}
+
+/// "Bu Mac / <remote>" segmented control.
+private struct HostPicker: View {
+    let remote: RemoteMonitor
+    @Bindable var selection: PanelSelection
+
+    var body: some View {
+        Picker("Mac", selection: $selection.showsRemote) {
+            Text("Bu Mac").tag(false)
+            Label {
+                Text(verbatim: UntrustedText.clean(remote.host))
+            } icon: {
+                Image(systemName: remote.state == .connected ? "circle.fill" : "circle")
+            }
+            .tag(true)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+    }
+}
+
+/// The cards for one Mac.
+private struct MetricsContent: View {
+    var snapshot: SystemSnapshot
+    var history: History
+    var hostInfo: HostInfo
+    var onOpenSettings: () -> Void
+
+    var body: some View {
+        VStack(spacing: Theme.Space.grid) {
+            HeaderView(hostInfo: hostInfo, now: snapshot.timestamp, onOpenSettings: onOpenSettings)
             Grid(horizontalSpacing: Theme.Space.grid, verticalSpacing: Theme.Space.grid) {
                 GridRow {
                     CPUCard(cpu: snapshot.cpu, history: history.cpu.elements)
@@ -44,10 +99,44 @@ struct PanelView: View {
                 DockerCard(docker: snapshot.docker)
             }
         }
+    }
+}
+
+/// The remote Mac's cards, or why there are none yet. Data that arrived before a disconnect
+/// stays visible under a banner rather than being blanked.
+private struct RemoteContent: View {
+    let remote: RemoteMonitor
+    var onOpenSettings: () -> Void
+
+    var body: some View {
+        VStack(spacing: Theme.Space.grid) {
+            if case .failed(let message) = remote.state {
+                StatusBanner(symbol: "exclamationmark.triangle.fill", text: message, tint: Theme.Load.elevated)
+            }
+            if let host = remote.hostInfo {
+                MetricsContent(snapshot: remote.snapshot, history: remote.history, hostInfo: host,
+                               onOpenSettings: onOpenSettings)
+            } else if remote.state == .connecting {
+                StatusBanner(symbol: "antenna.radiowaves.left.and.right", text: "Bağlanıyor…", tint: Theme.textSecondary)
+            }
+        }
+    }
+}
+
+private struct StatusBanner: View {
+    var symbol: String
+    var text: String
+    var tint: Color
+
+    var body: some View {
+        HStack(spacing: Theme.Space.m) {
+            Image(systemName: symbol).foregroundStyle(tint)
+            Text(text).font(Theme.Font.body).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
         .padding(Theme.Space.l)
-        // Cards stretch to their row's height; measuring at ideal height keeps that stretch
-        // inside each grid row instead of letting it spill into the panel.
-        .fixedSize(horizontal: false, vertical: true)
+        .background(Theme.cardFill, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }
 

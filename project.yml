@@ -42,8 +42,8 @@ targets:
         INFOPLIST_KEY_LSUIElement: YES
         INFOPLIST_KEY_CFBundleDisplayName: SystemMetrics
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
-        MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.2.0
+        CURRENT_PROJECT_VERSION: 2
   MetricsKitTests:
     type: bundle.unit-test
     platform: macOS

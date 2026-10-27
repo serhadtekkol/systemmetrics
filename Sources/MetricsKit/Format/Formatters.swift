@@ -63,7 +63,9 @@ public enum Formatters {
     /// Compact Turkish uptime: `"3g 4s"` (days, hours), `"4s 12dk"` (hours, minutes) or `"12dk"`.
     /// A boot time in the future (clock change) shows `"0dk"`.
     public static func uptime(since boot: Date, now: Date = Date()) -> String {
-        let minutes = max(0, Int(now.timeIntervalSince(boot) / 60))
+        // Clamp before converting: a remote Mac's boot time is untrusted, and Int(_:) traps on
+        // values outside its range. 100 years is far beyond any real uptime.
+        let minutes = Int(min(max(0, now.timeIntervalSince(boot) / 60), 52_560_000))
         let d = minutes / 1_440, h = (minutes % 1_440) / 60, m = minutes % 60
         if d > 0 { return "\(d)g \(h)s" }
         if h > 0 { return "\(h)s \(m)dk" }

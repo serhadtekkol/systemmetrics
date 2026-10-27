@@ -13,16 +13,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var closeTimer: Timer?
     private var settingsWindow: NSWindow?
     /// Last layout-relevant shape of the visible panel; the window is re-fitted only when it changes.
-    private var panelLayout: PanelLayoutKey?
+    private var panelLayout: PanelShape?
+    private let selection = PanelSelection()
+    /// The other Mac, when one is set in Settings.
+    private var remote: RemoteMonitor?
+    private var remoteChange: Task<Void, Never>?
+    /// Set after the first remote host is applied; later changes are debounced.
+    private var remoteStarted = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settings = AppSettings()
         engine = MetricsEngine(refreshInterval: settings.refreshInterval)
         statusItem = StatusItemController()
         let engine = engine!
+        let selection = selection
         panel = PanelController(
             makeContent: { [weak self] in
-                AnyView(PanelView(engine: engine, onOpenSettings: { self?.openSettings() }))
+                AnyView(PanelView(engine: engine, remote: self?.remote, selection: selection,
+                                  onOpenSettings: { self?.openSettings() }))
             },
             statusItemWindow: { [weak self] in self?.statusItem.buttonWindow })
         statusItem.onEvent = { [weak self] in self?.handle($0) }
@@ -31,6 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onEvent = { [weak self] in self?.handle($0) }
         observe()
         engine.start()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        remote?.stop()
     }
 
     private func handle(_ event: HoverStateMachine.Event) {
@@ -55,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 engine.isPanelOpen = true
                 panel.show(below: anchor, pinned: pinned)
-                panelLayout = PanelLayoutKey(engine.snapshot)
+                panelLayout = currentShape()
             case .hidePanel:
                 panel.hide()
                 engine.isPanelOpen = false
@@ -80,12 +92,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func render() {
         statusItem.update(snapshot: engine.snapshot, content: settings.menuBarContent)
         if engine.refreshInterval != settings.refreshInterval { engine.refreshInterval = settings.refreshInterval }
+        syncRemote()
         guard panel.isVisible else { return }
-        let layout = PanelLayoutKey(engine.snapshot)
+        let layout = currentShape()
         if layout != panelLayout, let anchor = statusItem.buttonScreenFrame {
             panelLayout = layout
             panel.reposition(below: anchor)
         }
+    }
+
+    /// Starts, replaces or stops the remote monitor to match Settings.
+    private func syncRemote() {
+        let host = settings.validRemoteHost
+        guard host != remote?.host else { remoteChange?.cancel(); remoteChange = nil; return }
+        // Typing "mini" would otherwise try "m", "mi", "min" first. Apply once the field has
+        // been still for a moment; the first value at launch applies at once.
+        if remote != nil || remoteStarted {
+            remoteChange?.cancel()
+            remoteChange = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                self?.remoteChange = nil
+                self?.applyRemote(host)
+            }
+            return
+        }
+        applyRemote(host)
+    }
+
+    private func applyRemote(_ host: String?) {
+        guard host == settings.validRemoteHost, host != remote?.host else { return }
+        remoteStarted = true
+        remote?.stop()
+        remote = host.map { RemoteMonitor(host: $0, interval: 2) }
+        remote?.start()
+        if remote == nil { selection.showsRemote = false }
+        // The panel's content captured the old monitor; remount it with the new one.
+        if panel.isVisible { panel.reloadContent() }
+    }
+
+    /// Everything that changes the panel's height: which Mac is shown, its connection state,
+    /// and the layout of the snapshot on screen.
+    private func currentShape() -> PanelShape {
+        guard let remote, selection.showsRemote else {
+            return PanelShape(hasRemote: remote != nil, showsRemote: false, remoteState: nil,
+                              hasRemoteData: false, layout: PanelLayoutKey(engine.snapshot))
+        }
+        return PanelShape(hasRemote: true, showsRemote: true, remoteState: remote.state,
+                          hasRemoteData: remote.hostInfo != nil, layout: PanelLayoutKey(remote.snapshot))
     }
 
     private func openSettings() {
@@ -103,4 +157,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
+}
+
+private struct PanelShape: Equatable {
+    var hasRemote: Bool
+    var showsRemote: Bool
+    var remoteState: RemoteMonitor.State?
+    var hasRemoteData: Bool
+    var layout: PanelLayoutKey
 }

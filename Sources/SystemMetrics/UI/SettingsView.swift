@@ -22,6 +22,20 @@ struct SettingsView: View {
             }
 
             Section {
+                TextField("Uzak Mac", text: $settings.remoteHost, prompt: Text(verbatim: "ör. mini"))
+                    .autocorrectionDisabled()
+                if !settings.remoteHost.isEmpty && settings.validRemoteHost == nil {
+                    Text("Geçerli bir SSH adı değil.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Load.high)
+                }
+            } footer: {
+                Text("~/.ssh/config içindeki adı ya da kullanıcı@makine yazın. Karşı Mac'te de SystemMetrics /Applications içinde kurulu olmalı; bağlantı SSH anahtarınızla kurulur.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Girişte başlat", isOn: $settings.launchAtLogin)
                 if let error = settings.launchAtLoginError {
                     // Red marks the problem; the message itself stays in label colors for contrast.
